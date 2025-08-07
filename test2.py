@@ -211,3 +211,4 @@ Answer comprehensively based on ALL provided context.
                 os.unlink(self.temp_file_path)
             except Exception as e:
                 pass  # Ignore cleanup errors
+

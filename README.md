@@ -4,9 +4,13 @@ An intelligent, two-part application that uses a Large Language Model (LLM) to p
 🚀 Features
 
 Intelligent Document Retrieval: Uses a Retrieval-Augmented Generation (RAG) pipeline with an in-memory vector store to find and retrieve relevant clauses from documents based on semantic understanding, not just keyword matching.
+
 Structured Output: Provides a consistent, machine-readable JSON response for each query, containing a clear decision, amount, and justification. This is crucial for integrating with downstream applications.
+
 Explicit Query Parsing: The system parses natural language queries to extract key details like age, procedure, and policy duration before processing.
+
 Flexible Document Support: Supports a variety of document types, including PDF (.pdf), Word documents (.docx), and emails (.eml).
+
 Modular Architecture: Separates the user interface (Streamlit) from the core processing logic (Flask), allowing for a more robust and scalable solution.
 
 ⚙️ Tech Stack
@@ -14,14 +18,19 @@ Modular Architecture: Separates the user interface (Streamlit) from the core pro
 Frontend
 
 Streamlit: For building the interactive, web-based user interface.
+
 requests: For making API calls from the Streamlit frontend to the Flask backend.
 
 Backend
 
 Python with Flask: A lightweight web framework that acts as the API server, exposing endpoints for document processing and queries.
+
 LangChain: Orchestrates the RAG pipeline.
+
 Google Gemini 2.0 Flash (gemini-2.0-flash-exp): The Large Language Model used for document analysis and response generation.
+
 HuggingFace Embeddings: Used to create the numerical representations of document chunks.
+
 Pydantic: Defines the structured data model for the JSON output, ensuring consistency.
 
 📦 Installation & Setup

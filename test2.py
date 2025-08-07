@@ -2,6 +2,8 @@ import os
 import tempfile
 import hashlib
 from dotenv import load_dotenv
+import json
+from pydantic import BaseModel, Field, ValidationError
 
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 from langchain_community.document_loaders.email import UnstructuredEmailLoader
@@ -9,15 +11,28 @@ from langchain.embeddings import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_core.runnables import RunnablePassthrough
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.prompts import PromptTemplate
+
+# === Define the structured output model ===
+class ClaimDecision(BaseModel):
+    """Structured output for a claim decision."""
+    decision: str = Field(description="The decision of the claim, e.g., 'Approved', 'Rejected', or 'Needs More Info'.")
+    amount: float = Field(description="The final payout amount in INR. Should be 0 if the claim is rejected.")
+    justification: str = Field(description="A detailed explanation for the decision, referencing specific clauses or rules from the document context.")
+    # Add a field for the raw extracted query details for debugging/audit
+    query_details: dict = Field(description="Structured details extracted from the user's query.")
 
 # === Load .env file if needed (optional) ===
 load_dotenv()
 
 class RAGProcessor:
     def __init__(self):
+        # FIX: Moved parser initialization to the start of the method
+        self.parser = JsonOutputParser(pydantic_object=ClaimDecision)
+        
         self.vector_store = None
         self.retriever = None
         self.rag_chain = None
@@ -30,43 +45,43 @@ class RAGProcessor:
         # === Embed & Store Vectors ===
         self.embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
         
-        # === Enhanced Prompt Template for Better Accuracy ===
-        self.enhanced_prompt = ChatPromptTemplate.from_template("""
-You are an expert document analyst. Your job is to provide accurate, comprehensive answers based strictly on the provided context.
-
+        # === Define the structured prompt template ===
+        # The prompt now explicitly instructs the LLM to output JSON and provides the schema.
+        self.structured_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", "You are an expert document analyst. Your job is to analyze user queries and document context to provide a structured, justified decision in JSON format. Your decisions MUST be based strictly on the provided context. If a detail is not in the document, you cannot make a decision on it."),
+                ("user", """
 Context from document:
 {context}
 
 User Query: {question}
 
 CRITICAL INSTRUCTIONS:
-1. READ ALL PROVIDED CONTEXT CAREFULLY - Multiple sections may contain relevant information
-2. For queries about duration, tenure, term, period - these are often synonymous in policy documents
-3. When asked about benefits or coverage, provide comprehensive details from ALL relevant sections
-4. If asked about headings/sections, mention the specific section names and numbers
-5. Always quote exact text from the document when possible
-6. If information spans multiple sections, combine all relevant details
-7. For coverage questions: Look for both what IS covered and what is NOT covered
-8. Don't assume - if something isn't explicitly stated, say so
-9. Be thorough - users prefer complete answers over brief ones
+1. First, analyze the 'User Query' and extract key details like age, procedure, location, and policy duration. Put these into a 'query_details' dictionary.
+2. Based on ALL the provided 'Context from document', evaluate the user's query against the rules and clauses.
+3. Determine a 'decision' (e.g., 'Approved' or 'Rejected'). If you cannot make a definitive decision due to missing information, use 'Needs More Info'.
+4. Determine the 'amount'. If the claim is rejected, the amount must be 0. If it is approved and the document specifies an amount, provide that. If no amount is specified, you can state 'As per document, amount not specified'.
+5. Provide a detailed 'justification' that directly references the specific clauses, sections, or rules from the context that led to your decision.
+6. The final output must be a valid JSON object matching this schema:
+{format_instructions}
 
-Structure your response as:
-- Direct answer to the question
-- Supporting details from the document (with exact quotes when relevant)
-- Section/heading references where information was found
+Answer comprehensively based on ALL provided context.
+""")
+            ]
+        ).partial(format_instructions=self.parser.get_format_instructions())
 
-Answer comprehensively based on ALL provided context:""")
 
         # === Initialize Gemini LLM with API key from .env ===
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             raise ValueError("GEMINI_API_KEY not found in .env file. Please add your API key to .env file.")
         
+        # Using a more suitable model for this task
         self.llm = ChatGoogleGenerativeAI(
             model="gemini-2.0-flash-exp",
             google_api_key=api_key,
             temperature=0.1,
-            max_output_tokens=512,  # Increased for more comprehensive answers
+            max_output_tokens=1024,  # Increased for comprehensive JSON output
             convert_system_message_to_human=True
         )
     
@@ -106,81 +121,44 @@ Answer comprehensively based on ALL provided context:""")
             # Improved retriever - balance between speed and accuracy
             self.retriever = self.vector_store.as_retriever(
                 search_type="similarity", 
-                search_kwargs={"k": 4}  # Increased to 4 for better context coverage
+                search_kwargs={"k": 5}  # Increased to 5 for better context coverage
             )
             
             # Build RAG chain
             self.rag_chain = (
-                {"context": self.retriever | self.format_docs_with_analysis, "question": RunnablePassthrough()}
-                | self.enhanced_prompt
+                {"context": self.retriever, "question": RunnablePassthrough()}
+                | self.structured_prompt
                 | self.llm
-                | StrOutputParser()
+                | self.parser
             )
             
             return True, f"Document loaded successfully! Found {len(pages)} text chunks."
             
         except Exception as e:
             return False, f"Error loading document: {str(e)}"
-    
-    def format_docs_with_analysis(self, docs):
-        """Format retrieved docs with clear separation and metadata"""
-        if not docs:
-            return "No relevant context found."
-        
-        # Sort docs by relevance score if available
-        formatted_context = ""
-        for i, doc in enumerate(docs, 1):
-            # Include more context information
-            page_info = f"Page {doc.metadata.get('page', 'Unknown')}" if doc.metadata.get('page') is not None else "Source document"
-            formatted_context += f"\n=== CONTEXT CHUNK {i} ({page_info}) ===\n{doc.page_content}\n"
-        
-        return formatted_context
 
     def get_source_info(self, docs):
         """Extract detailed chunk information from retrieved documents"""
         source_info = []
         for i, doc in enumerate(docs, 1):
+            # Pages are 0-indexed in metadata, so add 1 for display
             page_num = doc.metadata.get('page', 'Unknown')
-            if page_num != 'Unknown' and page_num is not None:
-                page_num = page_num + 1  # Add 1 because PDF pages are 0-indexed
+            if page_num != 'Unknown' and isinstance(page_num, int):
+                page_num += 1
             
             source_info.append({
                 'chunk_number': i,
                 'page': page_num,
-                'content': doc.page_content.strip(),
-                'content_length': len(doc.page_content)
+                'content': doc.page_content.strip()
             })
         return source_info
-
-    def create_synonym_expanded_query(self, question):
-        """Expand query with common synonyms without hardcoding specific terms"""
-        query_lower = question.lower()
-        expanded_parts = [question]  # Start with original query
-        
-        # Common synonym patterns in documents
-        synonym_pairs = [
-            ('duration', 'tenure term period validity'),
-            ('benefits', 'coverage advantages entitlements'),
-            ('policy', 'plan scheme contract agreement'),
-            ('covered', 'included eligible payable'),
-            ('exclusions', 'exceptions limitations restrictions'),
-            ('premium', 'cost price payment'),
-            ('claim', 'settlement payment reimbursement')
-        ]
-        
-        # Add synonyms if base word found
-        for base_word, synonyms in synonym_pairs:
-            if base_word in query_lower:
-                expanded_parts.append(synonyms)
-        
-        return ' '.join(expanded_parts)
 
     def get_cache_key(self, question):
         """Generate cache key for question"""
         return hashlib.md5(question.lower().strip().encode()).hexdigest()
 
     def process_query(self, question):
-        """Process user query with improved accuracy"""
+        """Process user query and return a structured JSON response."""
         if not self.rag_chain:
             return "Please upload a document first."
         
@@ -189,45 +167,39 @@ Answer comprehensively based on ALL provided context:""")
             cache_key = self.get_cache_key(question)
             if cache_key in self.query_cache:
                 cached_response = self.query_cache[cache_key]
-                return cached_response + "\n\n⚡ (Cached response)"
+                # Add a flag to indicate it's a cached response for the UI
+                cached_response['is_cached'] = True
+                return cached_response
             
-            # Create synonym-expanded query for better retrieval
-            enhanced_question = self.create_synonym_expanded_query(question)
+            # Get relevant chunks using the retriever separately to pass to the UI
+            relevant_docs = self.retriever.invoke(question)
             
-            # Get relevant chunks using enhanced query
-            relevant_docs = self.retriever.invoke(enhanced_question)
-            
-            # If we have docs, proceed with the chain
-            if relevant_docs:
-                # Use original question for the LLM
-                response = self.rag_chain.invoke(question)
-                
-                # Get detailed source information
-                sources = self.get_source_info(relevant_docs)
-                
-                # Format the complete response with full chunk information
-                complete_response = response.strip()
-                complete_response += "\n\n" + "="*50
-                complete_response += "\n📄 SOURCE CHUNKS USED:\n"
-                
-                for source in sources:
-                    page_info = f"Page {source['page']}" if source['page'] != 'Unknown' else "Source document"
-                    complete_response += f"\n--- CHUNK {source['chunk_number']} ({page_info}) ---\n"
-                    complete_response += f"{source['content']}\n"
-                
-                # Cache the response (without source chunks to save memory)
-                cache_response = response.strip() + f"\n\n📄 Referenced {len(sources)} chunks from document"
-                self.query_cache[cache_key] = cache_response
-                
-                # Limit cache size
-                if len(self.query_cache) > 30:  # Reduced cache size due to longer responses
-                    oldest_keys = list(self.query_cache.keys())[:10]
-                    for key in oldest_keys:
-                        del self.query_cache[key]
-                
-                return complete_response
-            else:
+            if not relevant_docs:
                 return "I couldn't find relevant information in the document to answer your question."
+                
+            # Invoke the RAG chain
+            response_json = self.rag_chain.invoke(question)
+
+            # Pydantic will parse the response, so no need for manual JSON parsing
+            # The chain already outputs the Pydantic object
+            structured_response = response_json
+
+            # Return the structured response and the source info
+            sources = self.get_source_info(relevant_docs)
+
+            # Add sources to the response object before caching
+            structured_response['sources'] = sources
+
+            # Cache the complete response object
+            self.query_cache[cache_key] = structured_response
+            
+            # Limit cache size
+            if len(self.query_cache) > 30:
+                oldest_keys = list(self.query_cache.keys())[:10]
+                for key in oldest_keys:
+                    del self.query_cache[key]
+            
+            return structured_response
                 
         except Exception as e:
             return f"An error occurred while processing your query: {str(e)}"
@@ -239,3 +211,4 @@ Answer comprehensively based on ALL provided context:""")
                 os.unlink(self.temp_file_path)
             except Exception as e:
                 pass  # Ignore cleanup errors
+

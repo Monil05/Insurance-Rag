@@ -1,6 +1,8 @@
 import streamlit as st
 import atexit
 from test2 import RAGProcessor
+import json
+import time
 
 # === Page Configuration ===
 st.set_page_config(
@@ -37,10 +39,24 @@ def main():
         st.session_state.document_loaded = False
     if 'chat_history' not in st.session_state:
         st.session_state.chat_history = []
+    
+    # === Functions to handle button clicks ===
+    def ask_question(question):
+        """Processes a given question and adds the response to chat history."""
+        if question.strip():
+            with st.spinner("Processing your query..."):
+                start_time = time.time()
+                response_obj = st.session_state.rag_processor.process_query(question)
+                end_time = time.time()
+                response_time = end_time - start_time
+                st.success(f"✅ Complete in {response_time:.1f}s")
+                st.session_state.chat_history.append((question, response_obj))
+                # Trigger a rerun to update the UI with the new chat message
+                st.rerun()
 
     # === Header ===
     st.title("📄 Document Q&A Assistant")
-    st.markdown("Upload your document and ask questions about it using Google Gemini 2.5 Pro!")
+    st.markdown("Upload your document and ask questions about it using Google Gemini 2.0 Flash!")
     st.markdown("---")
 
     # Check if RAG processor is available
@@ -73,120 +89,109 @@ def main():
                         st.error(message)
         
         # Document status
-        st.markdown("---")
-        if st.session_state.document_loaded:
-            st.success("✅ Document loaded successfully!")
-            st.info(f"📄 **Current document:** {uploaded_file.name if uploaded_file else 'Unknown'}")
-            st.info("🚀 **Powered by:** Google Gemini 2.5 Pro")
-            st.info("🎯 **Mode:** High Accuracy (4 chunks)")
-        else:
-            st.warning("⚠️ No document loaded")
-        
-        # Clear chat history button
-        if st.session_state.document_loaded and st.session_state.chat_history:
-            if st.button("🗑️ Clear Chat History"):
-                st.session_state.chat_history = []
-                st.rerun()
+    st.markdown("---")
+    if st.session_state.document_loaded:
+        st.success("✅ Document loaded successfully!")
+        st.info(f"📄 **Current document:** {uploaded_file.name if uploaded_file else 'Unknown'}")
+        st.info("🚀 **Powered by:** Google Gemini 2.0 Flash")
+    else:
+        st.warning("⚠️ No document loaded")
+    
+    # Clear chat history button
+    if st.session_state.document_loaded and st.session_state.chat_history:
+        if st.button("🗑️ Clear Chat History"):
+            st.session_state.chat_history = []
+            st.rerun()
 
     # === Main Content Area ===
-    col1, col2 = st.columns([2, 1])
+    st.header("💬 Ask Questions")
     
-    with col1:
-        st.header("💬 Ask Questions")
-        
-        # Display chat history with improved formatting
-        if st.session_state.chat_history:
-            st.subheader("Chat History")
-            for i, (question, answer) in enumerate(st.session_state.chat_history):
-                with st.expander(f"Q{i+1}: {question[:60]}..." if len(question) > 60 else f"Q{i+1}: {question}", expanded=(i == len(st.session_state.chat_history) - 1)):
-                    st.markdown(f"**Question:** {question}")
-                    st.markdown("**Answer:**")
+    # Display chat history with structured output
+    if st.session_state.chat_history:
+        for i, (question, response) in enumerate(st.session_state.chat_history):
+            with st.expander(f"Q{i+1}: {question[:60]}..." if len(question) > 60 else f"Q{i+1}: {question}", expanded=(i == len(st.session_state.chat_history) - 1)):
+                st.markdown(f"**Question:** {question}")
+                
+                # Check if the response is a structured object
+                if isinstance(response, dict):
+                    st.markdown("### 📊 Decision & Justification")
+                    if 'is_cached' in response and response['is_cached']:
+                        st.info("⚡ This is a cached response.")
+
+                    st.markdown(f"**Decision:** {response['decision']}")
+                    st.markdown(f"**Amount:** {response['amount'] if response['amount'] is not None else 'Not Specified'}")
+                    st.markdown(f"**Justification:** {response['justification']}")
                     
-                    # Split answer and source chunks for better display
-                    if "="*50 in answer:
-                        main_answer, source_section = answer.split("="*50, 1)
-                        st.markdown(main_answer)
-                        
-                        # Show source chunks in a separate expandable section
+                    if 'query_details' in response:
+                        with st.expander("🔍 View Parsed Query Details", expanded=False):
+                            st.json(response['query_details'])
+
+                    if 'sources' in response:
                         with st.expander("📄 View Source Chunks", expanded=False):
-                            st.text(source_section)
-                    else:
-                        st.text_area("", value=answer, height=300, key=f"answer_{i}", disabled=True)
+                            for source in response['sources']:
+                                page_info = f"Page {source['page']}" if source['page'] != 'Unknown' else "Source document"
+                                st.markdown(f"--- **Chunk {source['chunk_number']}** ({page_info}) ---")
+                                st.text(source['content'])
+                else:
+                    st.error("Error: Could not retrieve a structured response.")
+                    st.text(response)
 
-        # Question input
-        if st.session_state.document_loaded:
-            question = st.text_input(
-                "Enter your question:",
-                placeholder="e.g., What is the duration of this policy?",
-                key="question_input"
-            )
-            
-            col_ask, col_example = st.columns([1, 2])
-            
-            with col_ask:
-                if st.button("Ask Question", type="primary", disabled=not question.strip()):
-                    if question.strip():
-                        # Add progress tracking
-                        progress_bar = st.progress(0)
-                        status_text = st.empty()
-                        
-                        try:
-                            status_text.text("🔍 Searching document...")
-                            progress_bar.progress(25)
-                            
-                            status_text.text("🧠 Processing with AI...")
-                            progress_bar.progress(50)
-                            
-                            status_text.text("📄 Gathering comprehensive context...")
-                            progress_bar.progress(75)
-                            
-                            # Set a timeout for the query
-                            import time
-                            start_time = time.time()
-                            
-                            answer = st.session_state.rag_processor.process_query(question)
-                            
-                            end_time = time.time()
-                            response_time = end_time - start_time
-                            
-                            progress_bar.progress(100)
-                            status_text.text(f"✅ Complete in {response_time:.1f}s")
-                            
-                            st.session_state.chat_history.append((question, answer))
-                            
-                            # Clear progress indicators after a moment
-                            time.sleep(1)
-                            progress_bar.empty()
-                            status_text.empty()
-                            
-                            st.rerun()
-                            
-                        except Exception as e:
-                            progress_bar.empty()
-                            status_text.empty()
-                            st.error(f"Error: {str(e)}")
-                            st.info("💡 Try a simpler question or check your API key.")
-            
-            
-        else:
-            st.info("👆 Please upload and process a document first to start asking questions.")
-
-    with col2:
-        st.markdown("""
-        **Supported documents:**
-        - 📄 PDF files
-        - 📝 Word documents (.docx)
-        - 📧 Email files (.eml)
-        """)
+    # Question input
+    if st.session_state.document_loaded:
+        question_input = st.text_input(
+            "Enter your question:",
+            placeholder="e.g., 46M, knee surgery, Pune, 3-month policy",
+            key="question_input"
+        )
         
-        # Document info
-        if st.session_state.document_loaded and uploaded_file:
-            st.markdown("---")
-            st.subheader("📊 Document Info")
-            st.write(f"**Name:** {uploaded_file.name}")
-            st.write(f"**Size:** {uploaded_file.size / 1024:.1f} KB")
-            st.write(f"**Type:** {uploaded_file.type}")
+        col_ask, col_example = st.columns([1, 2])
+        
+        with col_ask:
+            # Main "Ask" button now uses the helper function
+            if st.button("Ask Question", type="primary", disabled=not question_input.strip()):
+                ask_question(question_input)
 
-# === Run App ===
+        with col_example:
+            st.markdown("**Example questions:**")
+            example_questions = [
+                "What is the policy duration?",
+                "What benefits are covered?",
+                "Which section mentions tenure?",
+                "45M, heart surgery, covered?",
+                "What are the exclusions?"
+            ]
+            
+            for eq in example_questions:
+                # Example buttons now directly trigger the helper function via a callback
+                st.button(eq, key=f"example_{eq}", help="Click to use this example", on_click=ask_question, args=(eq,))
+
+    else:
+        st.info("👆 Please upload and process a document first to start asking questions.")
+
+    st.markdown("---")
+    st.header("ℹ️ Instructions")
+    st.markdown("""
+    **Setup:**
+    1. **Create .env file** in your project folder:
+        ```
+        GEMINI_API_KEY=your_actual_api_key_here
+        ```
+    2. **Get API Key**: https://aistudio.google.com/
+    3. **Upload document and start chatting**
+    
+    **New Features:**
+    - 🎯 **Structured JSON Output**: Returns a machine-readable JSON object.
+    - 🔍 **Explicit Query Parsing**: The LLM is now instructed to explicitly parse and return key query details.
+    - 🧠 **Rule-Based Decisions**: The system is designed to provide a clear decision with justification, directly referencing document clauses.
+    - 📄 **Separate Sources**: Source chunks are now displayed separately from the main decision.
+    
+    **Supported documents:**
+    - 📄 PDF files
+    - 📝 Word documents (.docx)
+    - 📧 Email files (.eml)
+    """)
+    st.markdown("---")
+    
+    # === Run App ===
 if __name__ == "__main__":
     main()

@@ -64,7 +64,7 @@ def main():
         st.error("❌ Unable to initialize Gemini. Please check your .env file.")
         st.stop()
 
-    # === Sidebar for Document Upload ===
+    # === Sidebar for Document Upload and Information ===
     with st.sidebar:
         st.header("📁 Document Upload")
         
@@ -89,19 +89,37 @@ def main():
                         st.error(message)
         
         # Document status
-    st.markdown("---")
-    if st.session_state.document_loaded:
-        st.success("✅ Document loaded successfully!")
-        st.info(f"📄 **Current document:** {uploaded_file.name if uploaded_file else 'Unknown'}")
-        st.info("🚀 **Powered by:** Google Gemini 2.0 Flash")
-    else:
-        st.warning("⚠️ No document loaded")
-    
-    # Clear chat history button
-    if st.session_state.document_loaded and st.session_state.chat_history:
-        if st.button("🗑️ Clear Chat History"):
-            st.session_state.chat_history = []
-            st.rerun()
+        st.markdown("---")
+        if st.session_state.document_loaded:
+            st.success("✅ Document loaded successfully!")
+            st.info(f"📄 **Current document:** {uploaded_file.name if uploaded_file else 'Unknown'}")
+            st.info("🚀 **Powered by:** Google Gemini 2.0 Flash")
+        else:
+            st.warning("⚠️ No document loaded")
+        
+        # Document Info
+        if st.session_state.document_loaded and uploaded_file:
+            st.markdown("---")
+            st.subheader("📊 Document Info")
+            st.write(f"**Name:** {uploaded_file.name}")
+            st.write(f"**Size:** {uploaded_file.size / 1024:.1f} KB")
+            st.write(f"**Type:** {uploaded_file.type}")
+        
+        # Supported Documents
+        st.markdown("---")
+        st.markdown("### ℹ️ Supported documents")
+        st.markdown("""
+        - 📄 PDF files
+        - 📝 Word documents (.docx)
+        - 📧 Email files (.eml)
+        """)
+        
+        # Clear chat history button
+        if st.session_state.document_loaded and st.session_state.chat_history:
+            st.markdown("---")
+            if st.button("🗑️ Clear Chat History"):
+                st.session_state.chat_history = []
+                st.rerun()
 
     # === Main Content Area ===
     st.header("💬 Ask Questions")
@@ -168,30 +186,7 @@ def main():
     else:
         st.info("👆 Please upload and process a document first to start asking questions.")
 
-    st.markdown("---")
-    st.header("ℹ️ Instructions")
-    st.markdown("""
-    **Setup:**
-    1. **Create .env file** in your project folder:
-        ```
-        GEMINI_API_KEY=your_actual_api_key_here
-        ```
-    2. **Get API Key**: https://aistudio.google.com/
-    3. **Upload document and start chatting**
-    
-    **New Features:**
-    - 🎯 **Structured JSON Output**: Returns a machine-readable JSON object.
-    - 🔍 **Explicit Query Parsing**: The LLM is now instructed to explicitly parse and return key query details.
-    - 🧠 **Rule-Based Decisions**: The system is designed to provide a clear decision with justification, directly referencing document clauses.
-    - 📄 **Separate Sources**: Source chunks are now displayed separately from the main decision.
-    
-    **Supported documents:**
-    - 📄 PDF files
-    - 📝 Word documents (.docx)
-    - 📧 Email files (.eml)
-    """)
-    st.markdown("---")
-    
     # === Run App ===
 if __name__ == "__main__":
     main()
+

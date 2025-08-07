@@ -113,13 +113,6 @@ def main():
         - 📝 Word documents (.docx)
         - 📧 Email files (.eml)
         """)
-        
-        # Clear chat history button
-        if st.session_state.document_loaded and st.session_state.chat_history:
-            st.markdown("---")
-            if st.button("🗑️ Clear Chat History"):
-                st.session_state.chat_history = []
-                st.rerun()
 
     # === Main Content Area ===
     st.header("💬 Ask Questions")
@@ -182,6 +175,13 @@ def main():
             for eq in example_questions:
                 # Example buttons now directly trigger the helper function via a callback
                 st.button(eq, key=f"example_{eq}", help="Click to use this example", on_click=ask_question, args=(eq,))
+        
+        # Clear chat history button moved to the main content area
+        if st.session_state.document_loaded and st.session_state.chat_history:
+            st.markdown("---")
+            if st.button("🗑️ Clear Chat History"):
+                st.session_state.chat_history = []
+                st.rerun()
 
     else:
         st.info("👆 Please upload and process a document first to start asking questions.")
@@ -189,4 +189,5 @@ def main():
     # === Run App ===
 if __name__ == "__main__":
     main()
+
 

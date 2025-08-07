@@ -38,7 +38,7 @@ cd [your-project-folder]
 It is highly recommended to use a virtual environment to manage dependencies.
 python -m venv venv
 
-# Activate the virtual environment
+Activate the virtual environment
 
 For macOS/Linux:
 source venv/bin/activate
@@ -56,7 +56,7 @@ pip install -r requirements.txt
 4. Configure your API key
 
 The system requires a Google Gemini API key. Create a .env file in your project's root directory and add your key.
-# .env
+.env
 GEMINI_API_KEY=your_actual_api_key_here
 
 

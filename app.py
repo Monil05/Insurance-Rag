@@ -167,69 +167,16 @@ def main():
                             st.error(f"Error: {str(e)}")
                             st.info("💡 Try a simpler question or check your API key.")
             
-            with col_example:
-                st.markdown("**Example questions:**")
-                example_questions = [
-                    "What is the policy duration?",
-                    "What benefits are covered?",
-                    "Which section mentions tenure?",
-                    "45M, heart surgery, covered?",
-                    "What are the exclusions?"
-                ]
-                
-                for eq in example_questions:
-                    if st.button(eq, key=f"example_{eq}", help="Click to use this example"):
-                        st.session_state.question_input = eq
-                        st.rerun()
+            
         else:
             st.info("👆 Please upload and process a document first to start asking questions.")
 
     with col2:
-        st.header("ℹ️ Instructions")
         st.markdown("""
-        **Setup:**
-        1. **Create .env file** in your project folder:
-           ```
-           GEMINI_API_KEY=your_actual_api_key_here
-           ```
-        2. **Get API Key**: https://aistudio.google.com/
-        3. **Student Plan**: https://gemini.google/students/
-        4. **Upload document and start chatting**
-        
-        **Improved Features:**
-        - 🎯 **Higher Accuracy**: Uses 4 context chunks
-        - 🔍 **Synonym Recognition**: Finds related terms automatically
-        - 📄 **Full Source Display**: Shows complete chunks used
-        - 🧠 **Better Understanding**: Improved prompts for comprehensive answers
-        
-        **Question formats:**
-        - Direct: "What is the policy duration?"
-        - Section-based: "Which section mentions benefits?"
-        - Conversational: "46M, knee surgery, covered?"
-        - Comprehensive: "What are all the covered benefits?"
-        
         **Supported documents:**
         - 📄 PDF files
         - 📝 Word documents (.docx)
         - 📧 Email files (.eml)
-        
-        **Best for:**
-        - Insurance policies
-        - Legal documents
-        - HR policies
-        - Contracts
-        - Compliance documents
-        
-        **Performance:**
-        - ⚡ **Speed**: ~3-6 seconds per query
-        - 🎯 **Accuracy**: Enhanced with better context
-        - 💾 **Memory**: Smart caching for repeat queries
-        
-        **Tips:**
-        - Ask about specific sections or headings
-        - Use synonyms (duration = tenure = term)
-        - Request comprehensive coverage details
-        - Check source chunks for verification
         """)
         
         # Document info
